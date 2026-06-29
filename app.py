@@ -1,16 +1,15 @@
 """
 ================================================================================
-SPK-GeoOptima DSS v5.0 — UPGRADE EDITION
+SPK-GeoOptima DSS v5.1 — STREAMLIT CLOUD EDITION
 Framework: GIS + NSGA-II + Huff + Stackelberg + CVaR
-Fitur Baru: Plotly, AgGrid, Export Excel/PDF, Scenario Manager
+Fitur: Plotly, Export Excel/PDF, Scenario Manager
+Dihapus: st-aggrid (tidak kompatibel Python 3.14)
 ================================================================================
 """
 
 import sqlite3
 import pandas as pd
 import numpy as np
-import folium
-from folium.plugins import Fullscreen, MeasureControl, MiniMap, HeatMap
 import streamlit as st
 import matplotlib
 matplotlib.use('Agg')
@@ -25,13 +24,21 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================================
-# IMPORT LIBRARY BARU (UPGRADE)
+# IMPORT OPTIONAL — dengan fallback graceful
 # ============================================================
 try:
-    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
-    AGGRID_AVAILABLE = True
+    import folium
+    from folium.plugins import Fullscreen, MeasureControl, MiniMap, HeatMap
+    FOLIUM_AVAILABLE = True
 except ImportError:
-    AGGRID_AVAILABLE = False
+    FOLIUM_AVAILABLE = False
+    folium = None
+
+try:
+    from streamlit_folium import st_folium
+    STREAMLIT_FOLIUM_AVAILABLE = True
+except ImportError:
+    STREAMLIT_FOLIUM_AVAILABLE = False
 
 try:
     from fpdf import FPDF
@@ -49,14 +56,14 @@ except ImportError:
 # KONFIGURASI HALAMAN
 # ============================================================
 st.set_page_config(
-    page_title="SPK-GeoOptima v5.0 | DSS Infrastruktur Publik",
+    page_title="SPK-GeoOptima v5.1 | DSS Infrastruktur Publik",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ============================================================
-# STATE MANAGEMENT (UPGRADE — tambah scenario manager)
+# STATE MANAGEMENT
 # ============================================================
 if 'data_initialized' not in st.session_state:
     st.session_state.data_initialized = False
@@ -72,7 +79,7 @@ if 'compare_mode' not in st.session_state:
     st.session_state.compare_mode = False
 
 # ============================================================
-# CSS CUSTOM (UPGRADE — lebih modern)
+# CSS CUSTOM
 # ============================================================
 st.markdown("""
 <style>
@@ -124,11 +131,6 @@ st.markdown("""
 
     .footer-bar { background: linear-gradient(135deg, #0F172A, #1E3A8A); padding: 14px 24px; border-radius: 12px; color: white; font-size: 0.8rem; margin-top: 24px; }
 
-    .speed-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 700; }
-    .speed-fast { background: #D1FAE5; color: #065F46; }
-    .speed-standard { background: #DBEAFE; color: #1E40AF; }
-    .speed-accurate { background: #FEF3C7; color: #92400E; }
-
     .stTabs [data-baseweb="tab-list"] { gap: 6px; background: linear-gradient(135deg, #1E3A8A, #1E40AF); padding: 8px; border-radius: 10px; margin-bottom: 16px; }
     .stTabs [data-baseweb="tab"] { color: rgba(255,255,255,0.7) !important; background: transparent !important; border-radius: 8px !important; padding: 10px 20px !important; font-weight: 600 !important; font-size: 0.85rem !important; }
     .stTabs [aria-selected="true"] { background: linear-gradient(135deg, #3B82F6, #2563EB) !important; color: white !important; }
@@ -136,17 +138,14 @@ st.markdown("""
     .scenario-card { background: linear-gradient(135deg, #F8FAFC, #FFFFFF); border: 2px solid #E2E8F0; border-radius: 12px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: all 0.2s; }
     .scenario-card:hover { border-color: #3B82F6; box-shadow: 0 4px 12px rgba(59,130,246,0.1); }
     .scenario-active { border-color: #10B981 !important; background: linear-gradient(135deg, #ECFDF5, #F0FDF4) !important; }
-
-    .export-btn { background: linear-gradient(135deg, #3B82F6, #2563EB); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-    .export-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================
-# KELAS: SPATIAL DATABASE (UPGRADE — tambah saved_scenarios)
+# KELAS: SPATIAL DATABASE
 # ============================================================
 class SpatialDatabase:
-    def __init__(self, db_path="spklu_integrated_v50.db"):
+    def __init__(self, db_path="spklu_integrated_v51.db"):
         try:
             self.conn = sqlite3.connect(db_path, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
@@ -349,6 +348,7 @@ class SpatialDatabase:
 
     def close(self):
         self.conn.close()
+
 
 # ============================================================
 # KELAS: DISTANCE MATRIX
@@ -687,11 +687,11 @@ class IntegratedDSS:
         if progress_callback: progress_callback(1.0, "Selesai!")
         return {'huff': df_huff, 'huff_agg': df_huff_agg, 'cvar': df_cvar, 'nsga': pd.DataFrame(nsga_rows), 'stackelberg': df_stack_final, 'pareto': pareto_solutions}
 
+
 # ============================================================
-# HELPER: PLOTLY CHARTS (UPGRADE)
+# HELPER: PLOTLY CHARTS
 # ============================================================
 def plotly_bar_comparison(df, x_col, y1_col, y2_col, title, y1_name, y2_name, y_label):
-    """Bar chart interaktif Plotly"""
     fig = go.Figure()
     fig.add_trace(go.Bar(name=y1_name, x=df[x_col], y=df[y1_col], marker_color='#1E40AF', opacity=0.9))
     fig.add_trace(go.Bar(name=y2_name, x=df[x_col], y=df[y2_col], marker_color='#06B6D4', opacity=0.9))
@@ -707,7 +707,6 @@ def plotly_bar_comparison(df, x_col, y1_col, y2_col, title, y1_name, y2_name, y_
     return fig
 
 def plotly_pareto_scatter(df, x_col, y_col, color_col=None, title="", x_label="", y_label=""):
-    """Scatter plot interaktif untuk Pareto front"""
     if color_col and color_col in df.columns:
         fig = px.scatter(df, x=x_col, y=y_col, color=color_col, size_max=15,
                          title=title, labels={x_col: x_label, y_col: y_label},
@@ -726,7 +725,6 @@ def plotly_pareto_scatter(df, x_col, y_col, color_col=None, title="", x_label=""
     return fig
 
 def plotly_risk_distribution(values, var_val, cvar_val, title="Distribusi Risiko"):
-    """Histogram risiko interaktif"""
     fig = go.Figure()
     fig.add_trace(go.Histogram(x=values, nbinsx=50, marker_color='#3B82F6', opacity=0.7,
                                name='Distribusi Return'))
@@ -739,7 +737,6 @@ def plotly_risk_distribution(values, var_val, cvar_val, title="Distribusi Risiko
     return fig
 
 def plotly_payoff_chart(df, x_col, y1_col, y2_col, title):
-    """Grouped bar chart untuk payoff"""
     fig = go.Figure()
     fig.add_trace(go.Bar(name='Leader Payoff', x=df[x_col], y=df[y1_col], marker_color='#1E40AF'))
     fig.add_trace(go.Bar(name='Follower Payoff', x=df[x_col], y=df[y2_col], marker_color='#F59E0B'))
@@ -752,16 +749,14 @@ def plotly_payoff_chart(df, x_col, y1_col, y2_col, title):
     return fig
 
 # ============================================================
-# HELPER: EXPORT EXCEL (UPGRADE)
+# HELPER: EXPORT EXCEL
 # ============================================================
 def export_excel_full(results, df_kan, df_poi, df_wilayah, filename="rekomendasi_spklu.xlsx"):
-    """Export multi-sheet Excel dengan formatting"""
     if not OPENPYXL_AVAILABLE:
         return None
     from io import BytesIO
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Sheet 1: Rekomendasi Final
         df_stack = results.get('stackelberg', pd.DataFrame())
         df_cvar = results.get('cvar', pd.DataFrame())
         df_huff_agg = results.get('huff_agg', pd.DataFrame())
@@ -777,23 +772,17 @@ def export_excel_full(results, df_kan, df_poi, df_wilayah, filename="rekomendasi
             df_rekom['z_invest'] = 0; df_rekom['risk_rating'] = 'N/A'
         df_rekom['Status'] = df_rekom['x_terpilih'].apply(lambda x: 'Terpilih' if x == 1 else 'Ditolak')
         df_rekom[['nama','kab_kota','demand_tertangkap','biaya','z_invest','net_benefit','Status']].to_excel(writer, sheet_name='Rekomendasi', index=False)
-        # Sheet 2: Hasil Huff
         results.get('huff', pd.DataFrame()).to_excel(writer, sheet_name='Huff Model', index=False)
-        # Sheet 3: Hasil CVaR
         results.get('cvar', pd.DataFrame()).to_excel(writer, sheet_name='CVaR', index=False)
-        # Sheet 4: Hasil NSGA
         results.get('nsga', pd.DataFrame()).to_excel(writer, sheet_name='NSGA-II', index=False)
-        # Sheet 5: Stackelberg
         results.get('stackelberg', pd.DataFrame()).to_excel(writer, sheet_name='Stackelberg', index=False)
-        # Sheet 6: Data Kandidat
         df_kan.to_excel(writer, sheet_name='Data Kandidat', index=False)
-        # Sheet 7: Data POI
         df_poi.to_excel(writer, sheet_name='Data POI', index=False)
     output.seek(0)
     return output
 
 # ============================================================
-# HELPER: PDF REPORT GENERATOR (UPGRADE)
+# HELPER: PDF REPORT GENERATOR
 # ============================================================
 class PDFReport(FPDF):
     def header(self):
@@ -815,48 +804,37 @@ class PDFReport(FPDF):
         self.cell(0, 10, f'Halaman {self.page_no()}', align='C')
 
 def generate_pdf_report(results, df_kan, budget, min_jarak, nsga_pop, nsga_gen):
-    """Generate laporan PDF otomatis"""
     if not FPDF_AVAILABLE:
         return None
     from io import BytesIO
     pdf = PDFReport()
-    # Add Unicode font
     try:
         pdf.add_font('DejaVu', '', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', uni=True)
         pdf.add_font('DejaVu', 'B', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', uni=True)
         pdf.add_font('DejaVu', 'I', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf', uni=True)
     except:
-        # Fallback: try common paths or use default
         try:
             pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
             pdf.add_font('DejaVu', 'B', 'DejaVuSans-Bold.ttf', uni=True)
         except:
-            pdf.set_font('Arial', '', 10)  # fallback might not support Unicode well
-
+            pdf.set_font('Arial', '', 10)
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-
-    # Executive Summary
     pdf.set_font('DejaVu', 'B', 14)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(0, 10, '1. Ringkasan Eksekutif', ln=True)
     pdf.set_font('DejaVu', '', 11)
     pdf.set_text_color(71, 85, 105)
-
     df_stack = results.get('stackelberg', pd.DataFrame())
     df_cvar = results.get('cvar', pd.DataFrame())
     df_huff_agg = results.get('huff_agg', pd.DataFrame())
-
     terpilih = df_stack[df_stack['x_terpilih'] == 1] if not df_stack.empty else pd.DataFrame()
     n_terpilih = len(terpilih['id_kandidat'].unique()) if not terpilih.empty else 0
     total_inv = df_kan[df_kan['id'].isin(terpilih['id_kandidat'].unique())]['biaya'].sum() if not terpilih.empty else 0
     total_demand = df_kan['demand'].sum() if not df_kan.empty else 0
-
-    summary_text = f"""Berdasarkan framework SPRA-DSS, sistem telah mengidentifikasi {n_terpilih} lokasi prioritas untuk implementasi SPKLU di Kalimantan Selatan. Total investasi sebesar Rp {total_inv/1e9:.1f} Miliar dengan cakupan permintaan {total_demand:,.0f} kWh/hari. Parameter analisis: Budget Rp {budget/1e9:.0f}M, Jarak Minimum {min_jarak:.0f} km, NSGA-II Populasi {nsga_pop}, Generasi {nsga_gen}."""
+    summary_text = f"Berdasarkan framework SPRA-DSS, sistem telah mengidentifikasi {n_terpilih} lokasi prioritas untuk implementasi SPKLU di Kalimantan Selatan. Total investasi sebesar Rp {total_inv/1e9:.1f} Miliar dengan cakupan permintaan {total_demand:,.0f} kWh/hari. Parameter analisis: Budget Rp {budget/1e9:.0f}M, Jarak Minimum {min_jarak:.0f} km, NSGA-II Populasi {nsga_pop}, Generasi {nsga_gen}."
     pdf.multi_cell(0, 8, summary_text)
     pdf.ln(5)
-
-    # Parameter Section
     pdf.set_font('DejaVu', 'B', 14)
     pdf.cell(0, 10, '2. Parameter Analisis', ln=True)
     pdf.set_font('DejaVu', '', 11)
@@ -865,8 +843,6 @@ def generate_pdf_report(results, df_kan, budget, min_jarak, nsga_pop, nsga_gen):
     pdf.cell(0, 8, f'NSGA-II Populasi: {nsga_pop}', ln=True)
     pdf.cell(0, 8, f'NSGA-II Generasi: {nsga_gen}', ln=True)
     pdf.ln(5)
-
-    # Rekomendasi Table
     pdf.set_font('DejaVu', 'B', 14)
     pdf.cell(0, 10, '3. Matriks Keputusan Lokasi', ln=True)
     pdf.set_font('DejaVu', 'B', 10)
@@ -877,7 +853,6 @@ def generate_pdf_report(results, df_kan, budget, min_jarak, nsga_pop, nsga_gen):
     for h, w in zip(headers, col_widths):
         pdf.cell(w, 10, h, border=1, fill=True, align='C')
     pdf.ln()
-
     pdf.set_font('DejaVu', '', 9)
     pdf.set_text_color(71, 85, 105)
     df_rekom = df_kan.merge(df_huff_agg, left_on='id', right_on='id_kandidat', how='left').fillna(0)
@@ -893,7 +868,6 @@ def generate_pdf_report(results, df_kan, budget, min_jarak, nsga_pop, nsga_gen):
         pdf.cell(35, 8, f"Rp {row['biaya']/1e9:.1f}M", border=1, align='R')
         pdf.cell(25, 8, status, border=1, align='C')
         pdf.ln()
-
     output = BytesIO()
     pdf.output(output)
     output.seek(0)
@@ -903,7 +877,6 @@ def generate_pdf_report(results, df_kan, budget, min_jarak, nsga_pop, nsga_gen):
 # HELPER: SCENARIO MANAGER
 # ============================================================
 def save_scenario_to_db(db, nama, deskripsi, budget, max_lokasi, min_jarak, huff_beta, cvar_alpha, risk_aversion, nsga_pop, nsga_gen, results):
-    """Simpan skenario ke database"""
     hasil_json = json.dumps({
         'n_pareto': len(results.get('nsga', pd.DataFrame())),
         'n_terpilih': len(results.get('stackelberg', pd.DataFrame())[results.get('stackelberg', pd.DataFrame())['x_terpilih']==1]['id_kandidat'].unique()) if not results.get('stackelberg', pd.DataFrame()).empty else 0,
@@ -915,11 +888,11 @@ def save_scenario_to_db(db, nama, deskripsi, budget, max_lokasi, min_jarak, huff
     """, (nama, deskripsi, budget, max_lokasi, min_jarak, huff_beta, cvar_alpha, risk_aversion, nsga_pop, nsga_gen, hasil_json))
 
 def load_scenarios_from_db(db):
-    """Load semua skenario tersimpan"""
     return db.query("SELECT * FROM saved_scenarios ORDER BY created_at DESC")
 
 def delete_scenario(db, scenario_id):
     db.execute("DELETE FROM saved_scenarios WHERE id = ?", (scenario_id,))
+
 
 # ============================================================
 # INISIALISASI DATABASE
@@ -927,7 +900,7 @@ def delete_scenario(db, scenario_id):
 @st.cache_resource
 def get_db():
     try:
-        db = SpatialDatabase("spklu_integrated_v50.db")
+        db = SpatialDatabase("spklu_integrated_v51.db")
         db.seed_default_data()
         return db
     except Exception as e:
@@ -944,14 +917,13 @@ except Exception as e:
     st.stop()
 
 # ============================================================
-# SIDEBAR (UPGRADE — tambah scenario manager, export, dark mode)
+# SIDEBAR
 # ============================================================
 with st.sidebar:
     st.markdown("<h1 style='color:white; font-size:1.3rem; font-weight:800;'>⚡ SPK-GeoOptima</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#94A3B8; font-size:0.8rem;'>v5.0 — Spatial-Probabilistic Risk-Averse DSS</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#94A3B8; font-size:0.8rem;'>v5.1 — Spatial-Probabilistic Risk-Averse DSS</p>", unsafe_allow_html=True)
     st.markdown("---")
 
-    # Toggle Input Data Panel
     show_input = st.toggle("📝 Panel Input Data", st.session_state.show_input_panel, help="Buka panel untuk mengedit data")
     st.session_state.show_input_panel = show_input
     st.markdown("---")
@@ -980,7 +952,6 @@ with st.sidebar:
     run_analysis = st.button("🚀 Jalankan Analisis Terpadu", use_container_width=True)
     st.markdown("---")
 
-    # UPGRADE: Scenario Manager di Sidebar
     st.markdown("<h3 style='color:#E2E8F0; font-size:0.95rem;'>💾 Scenario Manager</h3>", unsafe_allow_html=True)
     with st.expander("Simpan / Load Skenario"):
         col_s1, col_s2 = st.columns(2)
@@ -992,7 +963,7 @@ with st.sidebar:
                 st.session_state.show_load_dialog = True
 
     st.markdown("---")
-    st.markdown("<p style='color:#64748B; font-size:0.7rem;'>v5.0 | GIS + NSGA-II + Huff + Stackelberg + CVaR</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#64748B; font-size:0.7rem;'>v5.1 | GIS + NSGA-II + Huff + Stackelberg + CVaR</p>", unsafe_allow_html=True)
 
 # ============================================================
 # HEADER
@@ -1025,7 +996,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# PANEL INPUT DATA
+# PANEL INPUT DATA — menggunakan st.data_editor (native Streamlit)
 # ============================================================
 if st.session_state.show_input_panel:
     st.markdown("<div class='input-panel'>", unsafe_allow_html=True)
@@ -1037,15 +1008,7 @@ if st.session_state.show_input_panel:
         gis_sub1, gis_sub2, gis_sub3, gis_sub4 = st.tabs(["🏛️ Wilayah", "📍 Kandidat", "🏢 POI", "🛣️ Jalan"])
         with gis_sub1:
             df_wilayah = db.query("SELECT * FROM wilayah_kalsel")
-            if AGGRID_AVAILABLE:
-                gb = GridOptionsBuilder.from_dataframe(df_wilayah)
-                gb.configure_pagination(enabled=True)
-                gb.configure_side_bar()
-                grid_options = gb.build()
-                edited = AgGrid(df_wilayah, gridOptions=grid_options, update_mode=GridUpdateMode.VALUE_CHANGED, fit_columns_on_grid_load=True)
-                edited_wilayah = edited['data']
-            else:
-                edited_wilayah = st.data_editor(df_wilayah, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_wilayah")
+            edited_wilayah = st.data_editor(df_wilayah, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_wilayah")
             if st.button("💾 Simpan Wilayah", key="sv_wilayah"):
                 db.execute("DELETE FROM wilayah_kalsel")
                 for _, row in edited_wilayah.iterrows():
@@ -1053,15 +1016,7 @@ if st.session_state.show_input_panel:
                 st.toast("✅ Data wilayah tersimpan!", icon="💾")
         with gis_sub2:
             df_kan_ed = db.query("SELECT * FROM kandidat_lokasi")
-            if AGGRID_AVAILABLE:
-                gb = GridOptionsBuilder.from_dataframe(df_kan_ed)
-                gb.configure_pagination(enabled=True)
-                gb.configure_side_bar()
-                grid_options = gb.build()
-                edited = AgGrid(df_kan_ed, gridOptions=grid_options, update_mode=GridUpdateMode.VALUE_CHANGED, fit_columns_on_grid_load=True)
-                edited_kan = edited['data']
-            else:
-                edited_kan = st.data_editor(df_kan_ed, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_kan")
+            edited_kan = st.data_editor(df_kan_ed, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_kan")
             if st.button("💾 Simpan Kandidat", key="sv_kan"):
                 db.execute("DELETE FROM kandidat_lokasi")
                 for _, row in edited_kan.iterrows():
@@ -1136,6 +1091,7 @@ if st.session_state.show_input_panel:
             st.toast("✅ Parameter CVaR tersimpan!", icon="💾")
     st.markdown("</div>", unsafe_allow_html=True)
 
+
 # ============================================================
 # EKSEKUSI PIPELINE
 # ============================================================
@@ -1161,7 +1117,6 @@ if run_analysis:
             progress_bar.empty(); status_text.empty(); time_text.empty()
             st.success(f"✅ Analisis selesai dalam **{total_time:.1f} detik**!")
             st.toast("🎉 Analisis berhasil! Lihat hasil di tab berikut.", icon="🚀")
-            # Auto-save scenario prompt
             st.balloons()
     except Exception as e:
         progress_bar.empty(); status_text.empty(); time_text.empty()
@@ -1190,7 +1145,7 @@ except Exception as e: st.error(f"Error memuat data: {e}"); st.stop()
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🗺️ Spasial", "🧬 NSGA-II", "🎯 Stackelberg & CVaR", "✅ Rekomendasi"])
 
 # ============================================================
-# TAB 1: DASHBOARD (UPGRADE — Plotly + Better KPI)
+# TAB 1: DASHBOARD
 # ============================================================
 with tab1:
     if results is None:
@@ -1221,7 +1176,6 @@ with tab1:
             </div>
             """, unsafe_allow_html=True)
 
-            # UPGRADE: Plotly charts
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("<div class='pbi-card'>", unsafe_allow_html=True)
@@ -1243,7 +1197,6 @@ with tab1:
                 st.plotly_chart(fig2, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            # Matriks Evaluasi
             st.markdown("<div class='pbi-card'>", unsafe_allow_html=True)
             st.markdown("<div class='pbi-card-title'>🏆 Matriks Evaluasi Kandidat</div>", unsafe_allow_html=True)
             df_matrix = df_kan.copy()
@@ -1261,66 +1214,76 @@ with tab1:
         except Exception as e: st.error(f"Error Dashboard: {e}"); st.exception(e)
 
 # ============================================================
-# TAB 2: SPASIAL (Tetap Folium — sudah bagus)
+# TAB 2: SPASIAL — dengan fallback jika folium tidak tersedia
 # ============================================================
 with tab2:
     st.markdown("<div class='pbi-card'>", unsafe_allow_html=True)
     st.markdown("<div class='pbi-card-title'>🗺️ Peta Interaktif Infrastruktur SPKLU</div>", unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: show_sel = st.toggle("Lokasi Terpilih", True)
-    with c2: show_rej = st.toggle("Lokasi Ditolak", True)
-    with c3: show_poi = st.toggle("Titik Permintaan", True)
-    with c4: show_heat = st.toggle("Heatmap Demand", False)
-    try:
-        center_lat = df_kan['lat'].mean(); center_lon = df_kan['lon'].mean()
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=9, tiles="CartoDB positron")
-        folium.TileLayer('OpenStreetMap', name='OSM').add_to(m)
-        folium.TileLayer(tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', name='Satelit', attr='Esri').add_to(m)
-        Fullscreen(position='topright').add_to(m); MeasureControl(position='topright', primary_length_unit='kilometers').add_to(m); MiniMap(toggle_display=True, position='bottomleft').add_to(m)
-        fg_selected = folium.FeatureGroup(name="✅ Lokasi Terpilih")
-        fg_rejected = folium.FeatureGroup(name="❌ Lokasi Ditolak")
-        fg_poi = folium.FeatureGroup(name="📍 POI Demand")
-        fg_jalan = folium.FeatureGroup(name="🛣️ Jaringan Jalan")
-        df_stack_map = db.query("SELECT * FROM hasil_stackelberg") if results else pd.DataFrame()
-        if show_sel and not df_stack_map.empty:
-            selected_ids = df_stack_map[df_stack_map['x_terpilih'] == 1]['id_kandidat'].unique()
-            for _, row in df_kan.iterrows():
-                if row['id'] in selected_ids:
-                    popup = f"<div style='font-family:Arial; width:280px;'><div style='background:#059669; padding:10px; color:white; border-radius:6px; margin-bottom:8px;'><div style='font-size:0.7rem;'>✓ LOKASI TERPILIH</div><div style='font-size:1rem; font-weight:700;'>{row['nama']}</div></div><div style='font-size:0.8rem;'>📍 {row['kab_kota']}<br>💰 Rp {row['biaya']/1e9:.2f}M<br>⚡ {row['demand']:,.0f} kWh/hari</div></div>"
-                    folium.Marker([row['lat'], row['lon']], popup=folium.Popup(popup, max_width=300), tooltip=f"✅ {row['nama']}", icon=folium.Icon(color='green', icon='bolt', prefix='fa')).add_to(fg_selected)
-        if show_rej and not df_stack_map.empty:
-            rejected_ids = df_stack_map[df_stack_map['x_terpilih'] == 0]['id_kandidat'].unique()
-            for _, row in df_kan.iterrows():
-                if row['id'] in rejected_ids:
-                    popup = f"<div style='font-family:Arial; width:260px;'><div style='background:#DC2626; padding:10px; color:white; border-radius:6px; margin-bottom:8px;'><div style='font-size:0.7rem;'>✗ TIDAK TERPILIH</div><div style='font-size:1rem; font-weight:700;'>{row['nama']}</div></div><div style='font-size:0.8rem;'>💰 Rp {row['biaya']/1e9:.2f}M<br>⚡ {row['demand']:,.0f} kWh/hari</div></div>"
-                    folium.Marker([row['lat'], row['lon']], popup=folium.Popup(popup, max_width=280), tooltip=f"❌ {row['nama']}", icon=folium.Icon(color='red', icon='times', prefix='fa')).add_to(fg_rejected)
-        if show_poi:
-            poi_colors = {'Mall':'#3B82F6','Rumah Sakit':'#10B981','Perkantoran':'#8B5CF6','Bandara':'#F59E0B','Kampus':'#EC4899','Wisata':'#06B6D4','Pelabuhan':'#6366F1','Pusat Kota':'#14B8A6','Pasar':'#D97706','Terminal':'#F97316','Industri':'#64748B','SPBU':'#84CC16','Olahraga':'#F43F5E','Religi':'#8B5CF6'}
-            for _, row in df_poi.iterrows():
-                color = poi_colors.get(row['tipe'], '#64748B')
-                folium.CircleMarker([row['lat'], row['lon']], radius=6, popup=folium.Popup(f"<b>{row['nama']}</b><br>{row['tipe']}<br>👥 {row['kunjungan_hari']:,} kunjungan/hari", max_width=200), tooltip=f"{row['tipe']}: {row['nama']}", color=color, fill=True, fill_color=color, fill_opacity=0.7, weight=2).add_to(fg_poi)
-        df_jalan = db.query("SELECT * FROM jaringan_jalan")
-        for _, row in df_jalan.iterrows():
-            color = '#1E40AF' if row['tipe'] == 'Arteri' else '#64748B'
-            weight = 4 if row['tipe'] == 'Arteri' else 2
-            folium.PolyLine([[row['lat_from'], row['lon_from']], [row['lat_to'], row['lon_to']]], color=color, weight=weight, opacity=0.6, tooltip=f"{row['nama']} ({row['panjang_km']:.1f} km)").add_to(fg_jalan)
-        if show_heat and results and not results.get('huff').empty:
-            heat_data = []
-            df_h = results['huff']
-            for _, row in df_h.iterrows():
-                if row['probabilitas'] > 0.05:
-                    kan = df_kan[df_kan['id'] == row['id_kandidat']].iloc[0]
-                    heat_data.append([kan['lat'], kan['lon'], row['demand_tertangkap']])
-            if heat_data: HeatMap(heat_data, radius=25, blur=15, max_zoom=10).add_to(m)
-        fg_selected.add_to(m); fg_rejected.add_to(m); fg_poi.add_to(m); fg_jalan.add_to(m)
-        folium.LayerControl(collapsed=False, position='topleft').add_to(m)
-        st_folium_html = m._repr_html_()
-        st.components.v1.html(st_folium_html, height=600)
-    except Exception as e: st.error(f"Error peta: {e}"); st.exception(e)
+
+    if not FOLIUM_AVAILABLE:
+        st.error("⚠️ Library `folium` tidak tersedia di environment ini. Menampilkan tabel koordinat sebagai alternatif.")
+        st.dataframe(df_kan[['nama','kab_kota','lat','lon','biaya','demand']].rename(columns={'lat':'Latitude','lon':'Longitude'}), hide_index=True, use_container_width=True)
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: show_sel = st.toggle("Lokasi Terpilih", True)
+        with c2: show_rej = st.toggle("Lokasi Ditolak", True)
+        with c3: show_poi = st.toggle("Titik Permintaan", True)
+        with c4: show_heat = st.toggle("Heatmap Demand", False)
+        try:
+            center_lat = df_kan['lat'].mean(); center_lon = df_kan['lon'].mean()
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=9, tiles="CartoDB positron")
+            folium.TileLayer('OpenStreetMap', name='OSM').add_to(m)
+            folium.TileLayer(tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', name='Satelit', attr='Esri').add_to(m)
+            Fullscreen(position='topright').add_to(m); MeasureControl(position='topright', primary_length_unit='kilometers').add_to(m); MiniMap(toggle_display=True, position='bottomleft').add_to(m)
+            fg_selected = folium.FeatureGroup(name="✅ Lokasi Terpilih")
+            fg_rejected = folium.FeatureGroup(name="❌ Lokasi Ditolak")
+            fg_poi = folium.FeatureGroup(name="📍 POI Demand")
+            fg_jalan = folium.FeatureGroup(name="🛣️ Jaringan Jalan")
+            df_stack_map = db.query("SELECT * FROM hasil_stackelberg") if results else pd.DataFrame()
+            if show_sel and not df_stack_map.empty:
+                selected_ids = df_stack_map[df_stack_map['x_terpilih'] == 1]['id_kandidat'].unique()
+                for _, row in df_kan.iterrows():
+                    if row['id'] in selected_ids:
+                        popup = f"<div style='font-family:Arial; width:280px;'><div style='background:#059669; padding:10px; color:white; border-radius:6px; margin-bottom:8px;'><div style='font-size:0.7rem;'>✓ LOKASI TERPILIH</div><div style='font-size:1rem; font-weight:700;'>{row['nama']}</div></div><div style='font-size:0.8rem;'>📍 {row['kab_kota']}<br>💰 Rp {row['biaya']/1e9:.2f}M<br>⚡ {row['demand']:,.0f} kWh/hari</div></div>"
+                        folium.Marker([row['lat'], row['lon']], popup=folium.Popup(popup, max_width=300), tooltip=f"✅ {row['nama']}", icon=folium.Icon(color='green', icon='bolt', prefix='fa')).add_to(fg_selected)
+            if show_rej and not df_stack_map.empty:
+                rejected_ids = df_stack_map[df_stack_map['x_terpilih'] == 0]['id_kandidat'].unique()
+                for _, row in df_kan.iterrows():
+                    if row['id'] in rejected_ids:
+                        popup = f"<div style='font-family:Arial; width:260px;'><div style='background:#DC2626; padding:10px; color:white; border-radius:6px; margin-bottom:8px;'><div style='font-size:0.7rem;'>✗ TIDAK TERPILIH</div><div style='font-size:1rem; font-weight:700;'>{row['nama']}</div></div><div style='font-size:0.8rem;'>💰 Rp {row['biaya']/1e9:.2f}M<br>⚡ {row['demand']:,.0f} kWh/hari</div></div>"
+                        folium.Marker([row['lat'], row['lon']], popup=folium.Popup(popup, max_width=280), tooltip=f"❌ {row['nama']}", icon=folium.Icon(color='red', icon='times', prefix='fa')).add_to(fg_rejected)
+            if show_poi:
+                poi_colors = {'Mall':'#3B82F6','Rumah Sakit':'#10B981','Perkantoran':'#8B5CF6','Bandara':'#F59E0B','Kampus':'#EC4899','Wisata':'#06B6D4','Pelabuhan':'#6366F1','Pusat Kota':'#14B8A6','Pasar':'#D97706','Terminal':'#F97316','Industri':'#64748B','SPBU':'#84CC16','Olahraga':'#F43F5E','Religi':'#8B5CF6'}
+                for _, row in df_poi.iterrows():
+                    color = poi_colors.get(row['tipe'], '#64748B')
+                    folium.CircleMarker([row['lat'], row['lon']], radius=6, popup=folium.Popup(f"<b>{row['nama']}</b><br>{row['tipe']}<br>👥 {row['kunjungan_hari']:,} kunjungan/hari", max_width=200), tooltip=f"{row['tipe']}: {row['nama']}", color=color, fill=True, fill_color=color, fill_opacity=0.7, weight=2).add_to(fg_poi)
+            df_jalan = db.query("SELECT * FROM jaringan_jalan")
+            for _, row in df_jalan.iterrows():
+                color = '#1E40AF' if row['tipe'] == 'Arteri' else '#64748B'
+                weight = 4 if row['tipe'] == 'Arteri' else 2
+                folium.PolyLine([[row['lat_from'], row['lon_from']], [row['lat_to'], row['lon_to']]], color=color, weight=weight, opacity=0.6, tooltip=f"{row['nama']} ({row['panjang_km']:.1f} km)").add_to(fg_jalan)
+            if show_heat and results and not results.get('huff').empty:
+                heat_data = []
+                df_h = results['huff']
+                for _, row in df_h.iterrows():
+                    if row['probabilitas'] > 0.05:
+                        kan = df_kan[df_kan['id'] == row['id_kandidat']].iloc[0]
+                        heat_data.append([kan['lat'], kan['lon'], row['demand_tertangkap']])
+                if heat_data: HeatMap(heat_data, radius=25, blur=15, max_zoom=10).add_to(m)
+            fg_selected.add_to(m); fg_rejected.add_to(m); fg_poi.add_to(m); fg_jalan.add_to(m)
+            folium.LayerControl(collapsed=False, position='topleft').add_to(m)
+
+            # Render peta dengan fallback
+            if STREAMLIT_FOLIUM_AVAILABLE:
+                st_folium(m, width=1200, height=600)
+            else:
+                st.components.v1.html(m._repr_html_(), height=600)
+        except Exception as e: st.error(f"Error peta: {e}"); st.exception(e)
     st.markdown("</div>", unsafe_allow_html=True)
 
+
 # ============================================================
-# TAB 3: NSGA-II (UPGRADE — Plotly Pareto)
+# TAB 3: NSGA-II
 # ============================================================
 with tab3:
     if results is None or results.get('nsga') is None or results['nsga'].empty:
@@ -1362,7 +1325,7 @@ with tab3:
         except Exception as e: st.error(f"Error NSGA-II: {e}"); st.exception(e)
 
 # ============================================================
-# TAB 4: STACKELBERG & CVaR (UPGRADE — Plotly)
+# TAB 4: STACKELBERG & CVaR
 # ============================================================
 with tab4:
     if results is None: st.info("Jalankan analisis terlebih dahulu.")
@@ -1414,7 +1377,7 @@ with tab4:
             except Exception as e: st.error(f"Error CVaR: {e}"); st.exception(e)
 
 # ============================================================
-# TAB 5: REKOMENDASI FINAL (UPGRADE — Export Excel + PDF)
+# TAB 5: REKOMENDASI FINAL
 # ============================================================
 with tab5:
     if results is None: st.info("Jalankan analisis untuk menghasilkan rekomendasi final.")
@@ -1462,7 +1425,6 @@ with tab5:
             df_final = df_final.sort_values('Permintaan', ascending=False)
             st.dataframe(df_final, hide_index=True, use_container_width=True)
 
-            # UPGRADE: Export Buttons
             st.markdown("---")
             st.subheader("📤 Export Hasil Analisis")
             c1, c2, c3 = st.columns(3)
@@ -1488,7 +1450,6 @@ with tab5:
                 else:
                     st.button("📄 Generate PDF (install fpdf2)", disabled=True, use_container_width=True)
 
-            # UPGRADE: Save Scenario
             st.markdown("---")
             st.subheader("💾 Simpan Skenario ke Database")
             with st.form("save_scenario_form"):
@@ -1503,7 +1464,7 @@ with tab5:
         except Exception as e: st.error(f"Error Rekomendasi: {e}"); st.exception(e)
 
 # ============================================================
-# SCENARIO MANAGER DIALOG (UPGRADE)
+# SCENARIO MANAGER DIALOG
 # ============================================================
 st.markdown("---")
 with st.expander("📂 Scenario Manager — Lihat & Bandingkan Skenario Tersimpan"):
@@ -1537,7 +1498,7 @@ with st.expander("📂 Scenario Manager — Lihat & Bandingkan Skenario Tersimpa
 # ============================================================
 st.markdown("""
 <div class='footer-bar'>
-    <div><b>⚡ SPK-GeoOptima v5.0</b> &nbsp;|&nbsp; Framework SPRA-DSS &nbsp;|&nbsp; Kalimantan Selatan</div>
+    <div><b>⚡ SPK-GeoOptima v5.1</b> &nbsp;|&nbsp; Framework SPRA-DSS &nbsp;|&nbsp; Kalimantan Selatan</div>
     <div>GIS + NSGA-II + Huff + Stackelberg + CVaR &nbsp;|&nbsp; Disertasi Infrastruktur Publik</div>
 </div>
 """, unsafe_allow_html=True)
