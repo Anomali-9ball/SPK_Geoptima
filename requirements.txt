@@ -4,7 +4,6 @@ numpy>=1.26.0
 folium>=0.18.0
 matplotlib>=3.9.0
 plotly>=5.24.0
-sreamlit-aggrid>=1.0.0
 openpyxl>=3.1.0
 fpdf2>=2.8.0
 streamlit-folium>=0.23.0
